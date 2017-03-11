@@ -25,82 +25,136 @@ let client = new MessagingHub.ClientBuilder()
 let lastAnswerForUser = {};
 
 client.addMessageReceiver(() => true, (m) => {
+    //if (m.type !== 'text/plain') return;
+    //console.log(`<< ${m.from}: ${JSON.stringify(m.content)}`);
+
     var userState = users[m.from];
 
-    switch(userState){
-        case '':
-        break;
+    if (userState == undefined) {
+        userState = {
+            state: 'init',
+            name: ''
+        }
+        users[m.from] = userState;
     }
 
-    if (m.type !== 'text/plain') return;
+    let message = {};
+    switch (userState.state) {
 
-    var options = {
-        method: 'POST',
-        uri: CHALLENGE_ENDPOINT,
-        body: {
-            "experience": "mobile-dev-bh",
-            "event": "untappd-checkin",
-            "data": {
-                "first_name": "Rafael",
-                "twitter": "ravpachecco",
-                "image-uri": "http://static.vhsys.com/vh-drive/produtos/6379058/_a5c6c25.jpg"
+        case 'init':
+
+            var directoryCommand = {
+                "id": Lime.Guid(),
+                "to": "postmaster@messenger.gw.msging.net",
+                "method": "get",
+                "uri": "lime://messenger.gw.msging.net/accounts/" + m.from.split("@")[0]
             }
-        },
-        json: true // Automatically stringifies the body to JSON
-    };
 
-    request(options)
-        .then(function (parsedBody) {
-            console.log(parsedBody);
-        })
-        .catch(function (err) {
-            console.log(err);
-        });
+            //console.log('directoryCommand >>' + JSON.stringify(directoryCommand));
 
+            client.sendCommand(directoryCommand)
+                .then((res) => {
+                    
+                    console.log(JSON.stringify(res));
 
+                    var userName = res.resource.fullName;
 
-    console.log(`<< ${m.from}: ${m.content}`);
+                    userState.name = userName;
+                    userState.state = 'picture';
+                    users[m.from] = userState;
 
-    if (m.content.indexOf('word') !== -1) {
-        registerAction({ category: 'User', action: 'asked for word' });
-    }
+                    console.log("Result" + JSON.stringify(res))
 
-    switch (lastAnswerForUser[m.from]) {
-        case undefined:
-            registerAction({ category: 'User', action: 'first request' });
+                    message = {
+                        id: Lime.Guid(),
+                        type: 'text/plain',
+                        content: `Olá ${userState.name} me envie a imagem de uma cerveja.`,
+                        to: m.from
+                    };
+                    console.log(`>> ${message.to}: ${message.content}`);
+
+                    client.sendMessage(message);
+                });
+
             break;
-        case false:
-            registerAction({ category: 'User', action: 'asked again after denial' });
-            break;
-        default:
-            registerAction({ category: 'User', action: 'asked again after answer' });
-            break;
-    }
 
-    // 50% chance of denying the request
-    if (Math.random() < 0.5) {
-        console.log(`!> No, ${m.from}!`);
-        lastAnswerForUser[m.from] = false;
-        registerAction({ category: 'Bot', action: 'denied' });
-        return;
-    }
+        case 'picture':
 
-    // answer with a random word
-    request
-        .get(API_ENDPOINT)
-        .then((res) => {
-            let message = {
+            message = {
                 id: Lime.Guid(),
                 type: 'text/plain',
-                content: res,
+                content: 'Olá me envie o login do seu twitter.',
+                to: m.from
+            };
+            
+            userState.picture = m.content.uri;
+            userState.state = 'twitter';
+            users[m.from] = userState;
+
+            console.log('UserState: ' + JSON.stringify(userState));
+
+            client.sendMessage(message);
+
+            break;
+
+        case 'twitter':
+
+            message = {
+                id: Lime.Guid(),
+                type: 'text/plain',
+                content: 'Confira o twitter e veja se funcionou.',
                 to: m.from
             };
             console.log(`>> ${message.to}: ${message.content}`);
-            lastAnswerForUser[m.from] = res;
-            registerAction({ category: 'Bot', action: 'answered' });
+
+            userState.twitter = m.content;
+            userState.state = 'init';
+            users[m.from] = userState;
+
             client.sendMessage(message);
-        })
-        .catch((err) => console.error(err));
+
+            var options = {
+                method: 'POST',
+                uri: CHALLENGE_ENDPOINT,
+                body: {
+                    "experience": "mobile-dev-bh",
+                    "event": "untappd-checkin",
+                    "data": {
+                        "first_name": userState.name,
+                        "twitter": userState.twitter,
+                        "image-uri": userState.picture
+                    }
+                },
+                json: true // Automatically stringifies the body to JSON
+            };
+
+            request(options)
+                .then(function (parsedBody) {
+                    console.log(parsedBody);
+                })
+                .catch(function (err) {
+                    console.log(err);
+                });
+
+            break;
+    }
+
+    // answer with a random word
+    //request
+    //    .get(API_ENDPOINT)
+    //    .then((res) => {
+    //        let message = {
+    //            id: Lime.Guid(),
+    //            type: 'text/plain',
+    //            content: res,
+    //            to: m.from
+    //        };
+    //        console.log(`>> ${message.to}: ${message.content}`);
+    //        lastAnswerForUser[m.from] = res;
+    //        registerAction({ category: 'Bot', action: 'answered' });
+    //        client.sendMessage(message);
+    //    })
+    //    .catch((err) => console.error(err));
 });
 
 // connect to the MessagingHub server
